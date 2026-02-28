@@ -1,0 +1,8 @@
+language: ro
+model_type: tiny
+max_parallel_jobs: 3
+temp_dir: temp_transcription
+postprocess:
+  min_chars: 80
+  max_chars: 120
+  subtitle_gap_ms: 100

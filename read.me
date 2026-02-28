@@ -1,0 +1,36 @@
+#verificam ce versiune avem de python
+python -m pip --version
+
+#instalezi tot
+python -m pip install whisper openai-whisper srt rich tqdm pyyaml
+
+#Instalează PyYAML și rich:
+python -m pip install --upgrade pip
+python -m pip install rich tqdm PyYAML
+
+#Verifică că modulele s-au instalat corect:
+python -c "import yaml, rich; print('Modules OK')"
+
+
+#instalezi librăriile necesare pentru script (exact în Python-ul ăsta 3.13):
+python -m pip install --upgrade pip
+python -m pip install rich tqdm PyYAML
+
+#instalezi whisper
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -U openai-whisper
+
+#Rulează scriptul pentru test:
+python mp3-to-text.py --version
+python mp3-to-text.py --init
+
+
+<<<<< si asa rulezi scriptul: >>>>>
+python mp3-to-text.py
+
+daca vrei executabil:
+#instaleaza pyinstaller
+python -m pip install pyinstaller
+
+#apoi creezi .exe 
+pyinstaller mp3-transcriber.spec
