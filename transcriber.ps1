@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Transcriber PowerShell - Audio/Video to SRT subtitle generator
 .DESCRIPTION
@@ -62,14 +62,14 @@ function Show-Banner {
     Clear-Host
     $bannerLines = @(
         "",
-        "  ╔══════════════════════════════════════════════════════════════╗",
-        "  ║                                                            ║",
-        "  ║        ♫  TRANSCRIBER PowerShell $script:VERSION              ║",
-        "  ║                                                            ║",
-        "  ║   Audio & Video  ──►  Subtitles (.srt)                     ║",
-        "  ║   Powered by OpenAI Whisper + FFmpeg                       ║",
-        "  ║                                                            ║",
-        "  ╚══════════════════════════════════════════════════════════════╝",
+        "  +==============================================================+",
+        "  |                                                              |",
+        "  |        [~] TRANSCRIBER PowerShell $script:VERSION                |",
+        "  |                                                              |",
+        "  |   Audio & Video  -->  Subtitles (.srt)                       |",
+        "  |   Powered by OpenAI Whisper + FFmpeg                         |",
+        "  |                                                              |",
+        "  +==============================================================+",
         ""
     )
     foreach ($line in $bannerLines) {
@@ -104,13 +104,13 @@ function Write-Err {
 function Write-Step {
     param([string]$StepNumber, [string]$Message)
     Write-Host ""
-    Write-Host "  ── Step $StepNumber ─────────────────────────────────────────" -ForegroundColor DarkCyan
+    Write-Host "  -- Step $StepNumber -------------------------------------------" -ForegroundColor DarkCyan
     Write-Host "  $Message" -ForegroundColor White
     Write-Host ""
 }
 
 function Write-Separator {
-    Write-Host "  ──────────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
 }
 
 function Show-Progress {
@@ -124,7 +124,7 @@ function Show-Progress {
     $barLength = 30
     $filled = [math]::Floor(($Current / $Total) * $barLength)
     $empty = $barLength - $filled
-    $bar = ("█" * $filled) + ("░" * $empty)
+    $bar = ("#" * $filled) + ("-" * $empty)
     Write-Host "`r  [$bar] $percent% ($Current/$Total) $FileName   " -ForegroundColor Cyan -NoNewline
     if ($Current -eq $Total) { Write-Host "" }
 }
@@ -418,11 +418,11 @@ function Show-FileList {
         $sizeStr = "{0:N1} MB" -f $size
 
         if ($ext -in $script:SUPPORTED_VIDEO_EXTENSIONS) {
-            $icon = "🎬"
+            $icon = "[V]"
             $color = "Magenta"
         }
         else {
-            $icon = "♫ "
+            $icon = "[A]"
             $color = "Green"
         }
         Write-Host "  $icon " -NoNewline
@@ -446,13 +446,13 @@ function Confirm-Start {
     Write-Step "4" "Confirmare si start"
 
     Write-Host "  Configurare finala:" -ForegroundColor White
-    Write-Host "  ● Model Whisper:  " -NoNewline
+    Write-Host "  * Model Whisper:  " -NoNewline
     Write-Host "$Model" -ForegroundColor Cyan
-    Write-Host "  ● Fisiere:        " -NoNewline
+    Write-Host "  * Fisiere:        " -NoNewline
     Write-Host "$FileCount" -ForegroundColor Cyan
-    Write-Host "  ● Limba sursa:    " -NoNewline
+    Write-Host "  * Limba sursa:    " -NoNewline
     Write-Host "Romana (RO)" -ForegroundColor Yellow
-    Write-Host "  ● Actiune:        " -NoNewline
+    Write-Host "  * Actiune:        " -NoNewline
     switch ($TranslateOption) {
         "transcribe"     { Write-Host "Transcriere (subtitrari RO)" -ForegroundColor Green }
         "both"           { Write-Host "Transcriere RO + Traducere EN" -ForegroundColor Green }
@@ -1097,9 +1097,9 @@ function Start-Transcription {
 
     # Processing
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "  ║              PROCESARE IN CURS...                           ║" -ForegroundColor Green
-    Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "  +==============================================================+" -ForegroundColor Green
+    Write-Host "  |              PROCESARE IN CURS...                           |" -ForegroundColor Green
+    Write-Host "  +==============================================================+" -ForegroundColor Green
     Write-Host ""
 
     $startTime = Get-Date
@@ -1117,14 +1117,14 @@ function Start-Transcription {
         if ($result.Status -eq "completed") {
             $completed++
             Write-Host ""
-            Write-Host "  ✓ " -ForegroundColor Green -NoNewline
+            Write-Host "  [OK] " -ForegroundColor Green -NoNewline
             Write-Host "Finalizat: $(Split-Path $result.File -Leaf)" -NoNewline
             Write-Host " ($($result.Reason))" -ForegroundColor DarkGray
         }
         else {
             $failed++
             Write-Host ""
-            Write-Host "  ✗ " -ForegroundColor Red -NoNewline
+            Write-Host "  [X] " -ForegroundColor Red -NoNewline
             Write-Host "Esuat: $(Split-Path $result.File -Leaf)" -NoNewline
             Write-Host " ($($result.Reason))" -ForegroundColor DarkGray
         }
@@ -1154,23 +1154,23 @@ function Start-Transcription {
 
     Write-Host ""
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "  ║                     REZUMAT PROCESARE                       ║" -ForegroundColor Cyan
-    Write-Host "  ╠══════════════════════════════════════════════════════════════╣" -ForegroundColor Cyan
-    Write-Host "  ║  Total fisiere:      " -ForegroundColor Cyan -NoNewline
+    Write-Host "  +==============================================================+" -ForegroundColor Cyan
+    Write-Host "  |                     REZUMAT PROCESARE                       |" -ForegroundColor Cyan
+    Write-Host "  +==============================================================+" -ForegroundColor Cyan
+    Write-Host "  |  Total fisiere:      " -ForegroundColor Cyan -NoNewline
     Write-Host ("{0,-38}" -f $toProcess.Count) -NoNewline
-    Write-Host "║" -ForegroundColor Cyan
-    Write-Host "  ║  Finalizate:         " -ForegroundColor Cyan -NoNewline
+    Write-Host "|" -ForegroundColor Cyan
+    Write-Host "  |  Finalizate:         " -ForegroundColor Cyan -NoNewline
     Write-Host ("{0,-38}" -f $completed) -ForegroundColor Green -NoNewline
-    Write-Host "║" -ForegroundColor Cyan
-    Write-Host "  ║  Esuate:             " -ForegroundColor Cyan -NoNewline
+    Write-Host "|" -ForegroundColor Cyan
+    Write-Host "  |  Esuate:             " -ForegroundColor Cyan -NoNewline
     $failColor = if ($failed -gt 0) { "Red" } else { "Green" }
     Write-Host ("{0,-38}" -f $failed) -ForegroundColor $failColor -NoNewline
-    Write-Host "║" -ForegroundColor Cyan
-    Write-Host "  ║  Durata:             " -ForegroundColor Cyan -NoNewline
+    Write-Host "|" -ForegroundColor Cyan
+    Write-Host "  |  Durata:             " -ForegroundColor Cyan -NoNewline
     Write-Host ("{0,-38}" -f $elapsedStr) -ForegroundColor Yellow -NoNewline
-    Write-Host "║" -ForegroundColor Cyan
-    Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "|" -ForegroundColor Cyan
+    Write-Host "  +==============================================================+" -ForegroundColor Cyan
     Write-Host ""
 
     if ($completed -gt 0) {
