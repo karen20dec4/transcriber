@@ -2,7 +2,7 @@
 
 ## Descriere
 Acest proiect transcrie fisiere audio si video in subtitrari (.srt) folosind OpenAI Whisper.
-Disponibil in doua variante: Python (GUI cu tkinter) si PowerShell (interfata consola colorata).
+Disponibil in doua variante: Python (GUI cu tkinter) si PowerShell (GUI cu Windows Forms).
 
 ---
 
@@ -13,15 +13,16 @@ Disponibil in doua variante: Python (GUI cu tkinter) si PowerShell (interfata co
 - **Video**: .mp4, .mov, .mkv, .avi, .wmv
 
 ### Functionalitati
+- **Interfata grafica** (Windows Forms) cu butoane, dropdown-uri si bara de progres
 - Transcriere audio/video in subtitrari romanesti (.srt)
 - Traducere optionala a subtitrarii in engleza (RO -> EN)
 - Selectare model Whisper (tiny, base, small, medium, large-v1, large-v2, large-v3, large-v3-turbo)
 - Post-procesare SRT (merge subtitrari scurte, split cele lungi)
 - Sistem de recovery (reia procesarea dupa intrerupere)
-- Interfata colorata si prietenoasa in consola
+- Detectare automata Whisper (PATH, Python Scripts, fallback wrapper)
 
 ### Cerinte
-- PowerShell 7+ (pwsh)
+- Windows PowerShell 5.1 sau PowerShell 7+
 - Python 3.8+
 - OpenAI Whisper (`pip install openai-whisper`)
 - FFmpeg
@@ -40,18 +41,25 @@ pip install -U openai-whisper
 
 ### Utilizare
 ```powershell
-# Ruleaza scriptul interactiv
+# Lanseaza interfata grafica
 .\transcriber.ps1
 
-# Afiseaza versiunea
+# Afiseaza versiunea (mod consola)
 .\transcriber.ps1 -ShowVersion
 
-# Creeaza fisierul de configurare implicit
+# Creeaza fisierul de configurare implicit (mod consola)
 .\transcriber.ps1 -Init
 
 # Specifica un fisier de configurare diferit
 .\transcriber.ps1 -ConfigFile "my_config.yaml"
 ```
+
+### Detectare Whisper
+Scriptul cauta Whisper in ordinea urmatoare:
+1. `whisper` / `whisper.exe` in PATH
+2. `python -m whisper`
+3. In directoarele Scripts ale Python (system si user)
+4. Fallback: creaza un wrapper Python temporar (`whisper_runner.py`)
 
 ---
 
