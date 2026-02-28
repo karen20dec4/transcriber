@@ -5,6 +5,7 @@
     Transcribes audio and video files to SRT subtitles using OpenAI Whisper.
     Supports: .mp3, .mp4, .mov, .mkv, .avi, .wmv
     Features: model selection, Romanian-to-English translation, SRT optimization.
+    GUI mode using Windows Forms.
 .NOTES
     Version: v1.0-ps1
     Requires: Python 3, openai-whisper, ffmpeg
@@ -55,78 +56,14 @@ $script:DEFAULT_MAX_CHARS       = 120
 $script:DEFAULT_SUBTITLE_GAP_MS = 100
 
 # ============================================================
-# UI HELPERS
+# LOG BUFFER
 # ============================================================
+$script:LogBuffer = [System.Collections.ArrayList]::new()
 
-function Show-Banner {
-    Clear-Host
-    $bannerLines = @(
-        "",
-        "  +==============================================================+",
-        "  |                                                              |",
-        "  |        [~] TRANSCRIBER PowerShell $script:VERSION                |",
-        "  |                                                              |",
-        "  |   Audio & Video  -->  Subtitles (.srt)                       |",
-        "  |   Powered by OpenAI Whisper + FFmpeg                         |",
-        "  |                                                              |",
-        "  +==============================================================+",
-        ""
-    )
-    foreach ($line in $bannerLines) {
-        Write-Host $line -ForegroundColor Cyan
-    }
-}
-
-function Write-Info {
+function Add-LogMessage {
     param([string]$Message)
-    Write-Host "  [INFO] " -ForegroundColor Blue -NoNewline
-    Write-Host $Message
-}
-
-function Write-Success {
-    param([string]$Message)
-    Write-Host "  [OK]   " -ForegroundColor Green -NoNewline
-    Write-Host $Message
-}
-
-function Write-Warn {
-    param([string]$Message)
-    Write-Host "  [WARN] " -ForegroundColor Yellow -NoNewline
-    Write-Host $Message
-}
-
-function Write-Err {
-    param([string]$Message)
-    Write-Host "  [ERR]  " -ForegroundColor Red -NoNewline
-    Write-Host $Message
-}
-
-function Write-Step {
-    param([string]$StepNumber, [string]$Message)
-    Write-Host ""
-    Write-Host "  -- Step $StepNumber -------------------------------------------" -ForegroundColor DarkCyan
-    Write-Host "  $Message" -ForegroundColor White
-    Write-Host ""
-}
-
-function Write-Separator {
-    Write-Host "  ----------------------------------------------------------" -ForegroundColor DarkGray
-}
-
-function Show-Progress {
-    param(
-        [int]$Current,
-        [int]$Total,
-        [string]$FileName
-    )
-    if ($Total -eq 0) { return }
-    $percent = [math]::Floor(($Current / $Total) * 100)
-    $barLength = 30
-    $filled = [math]::Floor(($Current / $Total) * $barLength)
-    $empty = $barLength - $filled
-    $bar = ("#" * $filled) + ("-" * $empty)
-    Write-Host "`r  [$bar] $percent% ($Current/$Total) $FileName   " -ForegroundColor Cyan -NoNewline
-    if ($Current -eq $Total) { Write-Host "" }
+    $ts = (Get-Date).ToString("HH:mm:ss")
+    [void]$script:LogBuffer.Add("[$ts] $Message")
 }
 
 # ============================================================
@@ -134,7 +71,7 @@ function Show-Progress {
 # ============================================================
 
 function Test-Dependencies {
-    Write-Step "0" "Verificare dependente (Checking dependencies)..."
+    Add-LogMessage "Verificare dependente (Checking dependencies)..."
 
     # Check Python
     $pythonCmd = $null
@@ -149,39 +86,117 @@ function Test-Dependencies {
         catch { }
     }
     if (-not $pythonCmd) {
-        Write-Err "Python 3 nu a fost gasit. Instaleaza Python 3.8+ de la https://python.org"
+        Add-LogMessage "[ERR] Python 3 nu a fost gasit. Instaleaza Python 3.8+ de la https://python.org"
         return $false
     }
-    Write-Success "Python: $( & $pythonCmd --version 2>&1 )"
+    Add-LogMessage "[OK] Python: $( & $pythonCmd --version 2>&1 )"
+    $script:PythonCommand = $pythonCmd
 
     # Check whisper CLI
-    $whisperCmd = $null
+    $script:WhisperExe = $null
+    $script:WhisperArgs = @()
+
+    # Method 1: Try whisper directly in PATH
     foreach ($cmd in @("whisper", "whisper.exe")) {
         try {
             $result = & $cmd --help 2>&1
             if ($?) {
-                $whisperCmd = $cmd
+                $script:WhisperExe = $cmd
+                Add-LogMessage "[OK] Whisper gasit in PATH: $cmd"
                 break
             }
         }
         catch { }
     }
-    if (-not $whisperCmd) {
-        # Try python -m whisper
+
+    # Method 2: Try python -m whisper
+    if (-not $script:WhisperExe) {
         try {
             $result = & $pythonCmd -m whisper --help 2>&1
             if ($?) {
-                $whisperCmd = "$pythonCmd -m whisper"
+                $script:WhisperExe = $pythonCmd
+                $script:WhisperArgs = @("-m", "whisper")
+                Add-LogMessage "[OK] Whisper disponibil ca: $pythonCmd -m whisper"
             }
         }
         catch { }
     }
-    if (-not $whisperCmd) {
-        Write-Err "Whisper nu a fost gasit. Instaleaza cu: pip install openai-whisper"
+
+    # Method 3: Search Python Scripts directories
+    if (-not $script:WhisperExe) {
+        Add-LogMessage "[INFO] Cautare whisper in directoarele Scripts Python..."
+        try {
+            $pyFinderPath = Join-Path $env:TEMP "transcriber_find_scripts.py"
+            $pyLines = @(
+                "import sys, os, sysconfig, site",
+                "dirs = []",
+                "dirs.append(os.path.join(os.path.dirname(sys.executable), 'Scripts'))",
+                "dirs.append(sysconfig.get_path('scripts'))",
+                "try:",
+                "    usp = site.getusersitepackages()",
+                "    if usp:",
+                "        dirs.append(os.path.join(os.path.dirname(usp), 'Scripts'))",
+                "except Exception:",
+                "    pass",
+                "seen = set()",
+                "for d in dirs:",
+                "    if d and os.path.isdir(d) and d not in seen:",
+                "        seen.add(d)",
+                "        print(d)"
+            )
+            [System.IO.File]::WriteAllText($pyFinderPath, ($pyLines -join [Environment]::NewLine))
+            $scriptDirs = & $pythonCmd $pyFinderPath 2>&1
+            Remove-Item $pyFinderPath -ErrorAction SilentlyContinue
+
+            if ($scriptDirs) {
+                foreach ($dir in $scriptDirs) {
+                    $dir = "$dir".Trim()
+                    if ($dir -eq "") { continue }
+                    $whisperExePath = Join-Path $dir "whisper.exe"
+                    if (Test-Path $whisperExePath) {
+                        $script:WhisperExe = $whisperExePath
+                        Add-LogMessage "[OK] Whisper gasit in Scripts: $dir"
+                        break
+                    }
+                    $whisperNoExt = Join-Path $dir "whisper"
+                    if (Test-Path $whisperNoExt) {
+                        $script:WhisperExe = $whisperNoExt
+                        Add-LogMessage "[OK] Whisper gasit in Scripts: $dir"
+                        break
+                    }
+                }
+            }
+        }
+        catch {
+            Add-LogMessage "[WARN] Eroare la cautarea in Scripts: $_"
+        }
+    }
+
+    # Method 4: Fallback - create whisper_runner.py wrapper
+    if (-not $script:WhisperExe) {
+        Add-LogMessage "[INFO] Se incearca fallback cu whisper_runner.py..."
+        try {
+            $importCheck = & $pythonCmd -c "import whisper" 2>&1
+            if ($?) {
+                $runnerPath = Join-Path $env:TEMP "whisper_runner.py"
+                $runnerLines = @(
+                    "from whisper.cli import cli",
+                    "cli()"
+                )
+                [System.IO.File]::WriteAllText($runnerPath, ($runnerLines -join [Environment]::NewLine))
+                $script:WhisperExe = $pythonCmd
+                $script:WhisperArgs = @("`"$runnerPath`"")
+                Add-LogMessage "[OK] Whisper runner creat: $runnerPath"
+            }
+        }
+        catch { }
+    }
+
+    if (-not $script:WhisperExe) {
+        Add-LogMessage "[ERR] Whisper nu a fost gasit. Instaleaza cu: pip install openai-whisper"
         return $false
     }
-    Write-Success "Whisper CLI: disponibil"
-    $script:WhisperCommand = $whisperCmd
+    Add-LogMessage "[OK] Whisper CLI: disponibil"
 
     # Check ffmpeg
     try {
@@ -190,14 +205,14 @@ function Test-Dependencies {
             throw "ffmpeg not found"
         }
         $versionLine = ($result | Select-Object -First 1)
-        Write-Success "FFmpeg: $versionLine"
+        Add-LogMessage "[OK] FFmpeg: $versionLine"
     }
     catch {
-        Write-Err "FFmpeg nu a fost gasit. Instaleaza FFmpeg de la https://ffmpeg.org"
+        Add-LogMessage "[ERR] FFmpeg nu a fost gasit. Instaleaza FFmpeg de la https://ffmpeg.org"
         return $false
     }
 
-    Write-Success "Toate dependentele sunt disponibile!"
+    Add-LogMessage "[OK] Toate dependentele sunt disponibile!"
     return $true
 }
 
@@ -220,7 +235,6 @@ function Get-DefaultConfig {
 
 function Save-ConfigYaml {
     param([hashtable]$Config, [string]$Path)
-    # Simple YAML writer (no external dependency needed)
     $lines = @(
         "language: $($Config.language)",
         "model_type: $($Config.model_type)",
@@ -237,7 +251,7 @@ function Load-Config {
     param([string]$Path)
     $default = Get-DefaultConfig
     if (-not (Test-Path $Path)) {
-        Write-Warn "Fisierul de configurare '$Path' nu exista. Se creeaza cu valori implicite."
+        Add-LogMessage "[WARN] Fisierul '$Path' nu exista. Se creeaza cu valori implicite."
         Save-ConfigYaml -Config $default -Path $Path
         return $default
     }
@@ -254,7 +268,6 @@ function Load-Config {
                 $cfg[$key] = $val
             }
         }
-        # Merge with defaults
         foreach ($key in $default.Keys) {
             if (-not $cfg.ContainsKey($key)) {
                 $cfg[$key] = $default[$key]
@@ -266,7 +279,6 @@ function Load-Config {
         elseif ($cfg["postprocess"] -isnot [hashtable]) {
             $cfg["postprocess"] = $default.postprocess
         }
-        # Ensure postprocess sub-keys
         foreach ($subKey in $default.postprocess.Keys) {
             if (-not $cfg.postprocess.ContainsKey($subKey)) {
                 $cfg.postprocess[$subKey] = $default.postprocess[$subKey]
@@ -275,7 +287,7 @@ function Load-Config {
         return $cfg
     }
     catch {
-        Write-Warn "Eroare la citirea configurarii: $($_.Exception.Message). Se folosesc valorile implicite."
+        Add-LogMessage "[WARN] Eroare la citirea configurarii: $($_.Exception.Message)"
         return $default
     }
 }
@@ -298,170 +310,8 @@ function Save-Recovery {
         $State | ConvertTo-Json -Depth 5 | Set-Content -Path $script:RECOVERY_FILE -Encoding UTF8
     }
     catch {
-        Write-Err "Nu pot salva recovery: $_"
+        Add-LogMessage "[ERR] Nu pot salva recovery: $_"
     }
-}
-
-# ============================================================
-# INTERACTIVE MENUS
-# ============================================================
-
-function Select-WorkingDirectory {
-    Write-Step "1" "Selecteaza directorul cu fisierele media"
-
-    $currentDir = Get-Location
-    Write-Host "  Director curent: " -NoNewline
-    Write-Host "$currentDir" -ForegroundColor Yellow
-    Write-Host ""
-
-    Write-Host "  [1] " -ForegroundColor Cyan -NoNewline
-    Write-Host "Foloseste directorul curent"
-    Write-Host "  [2] " -ForegroundColor Cyan -NoNewline
-    Write-Host "Introdu o cale diferita"
-    Write-Host ""
-
-    $choice = Read-Host "  Alege optiunea (1/2)"
-    switch ($choice) {
-        "2" {
-            $path = Read-Host "  Introdu calea directorului"
-            if (Test-Path $path -PathType Container) {
-                return $path
-            }
-            else {
-                Write-Err "Directorul '$path' nu exista. Se foloseste directorul curent."
-                return $currentDir.Path
-            }
-        }
-        default {
-            return $currentDir.Path
-        }
-    }
-}
-
-function Select-WhisperModel {
-    Write-Step "2" "Selecteaza modelul Whisper"
-
-    Write-Host "  Modele disponibile:" -ForegroundColor White
-    Write-Host ""
-    Write-Host "  [1] " -ForegroundColor Cyan -NoNewline
-    Write-Host "tiny          " -ForegroundColor White -NoNewline
-    Write-Host "- Cel mai rapid, acuratete scazuta (~75 MB)" -ForegroundColor DarkGray
-    Write-Host "  [2] " -ForegroundColor Cyan -NoNewline
-    Write-Host "base          " -ForegroundColor White -NoNewline
-    Write-Host "- Rapid, acuratete moderata (~142 MB)" -ForegroundColor DarkGray
-    Write-Host "  [3] " -ForegroundColor Cyan -NoNewline
-    Write-Host "small         " -ForegroundColor White -NoNewline
-    Write-Host "- Echilibrat viteza/acuratete (~466 MB) [RECOMANDAT]" -ForegroundColor Green
-    Write-Host "  [4] " -ForegroundColor Cyan -NoNewline
-    Write-Host "medium        " -ForegroundColor White -NoNewline
-    Write-Host "- Buna acuratete, mai lent (~1.5 GB)" -ForegroundColor DarkGray
-    Write-Host "  [5] " -ForegroundColor Cyan -NoNewline
-    Write-Host "large-v1      " -ForegroundColor White -NoNewline
-    Write-Host "- Acuratete mare (~2.9 GB)" -ForegroundColor DarkGray
-    Write-Host "  [6] " -ForegroundColor Cyan -NoNewline
-    Write-Host "large-v2      " -ForegroundColor White -NoNewline
-    Write-Host "- Acuratete mare imbunatatita (~2.9 GB)" -ForegroundColor DarkGray
-    Write-Host "  [7] " -ForegroundColor Cyan -NoNewline
-    Write-Host "large-v3      " -ForegroundColor White -NoNewline
-    Write-Host "- Cea mai buna acuratete (~2.9 GB)" -ForegroundColor DarkGray
-    Write-Host "  [8] " -ForegroundColor Cyan -NoNewline
-    Write-Host "large-v3-turbo" -ForegroundColor White -NoNewline
-    Write-Host "- Acuratete mare + viteza buna (~1.5 GB)" -ForegroundColor DarkGray
-    Write-Host ""
-
-    $choice = Read-Host "  Alege modelul (1-8, implicit=3 small)"
-    switch ($choice) {
-        "1" { return "tiny" }
-        "2" { return "base" }
-        "3" { return "small" }
-        "4" { return "medium" }
-        "5" { return "large-v1" }
-        "6" { return "large-v2" }
-        "7" { return "large-v3" }
-        "8" { return "large-v3-turbo" }
-        default { return "small" }
-    }
-}
-
-function Select-TranslationOption {
-    Write-Step "3" "Optiuni de traducere"
-
-    Write-Host "  Limba sursa a fisierelor: " -NoNewline
-    Write-Host "Romana (RO)" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "  [1] " -ForegroundColor Cyan -NoNewline
-    Write-Host "Doar transcriere (subtitrari in romana)"
-    Write-Host "  [2] " -ForegroundColor Cyan -NoNewline
-    Write-Host "Transcriere + Traducere in engleza"
-    Write-Host "  [3] " -ForegroundColor Cyan -NoNewline
-    Write-Host "Doar traducere in engleza (fara subtitrare in romana)"
-    Write-Host ""
-
-    $choice = Read-Host "  Alege optiunea (1-3, implicit=1)"
-    switch ($choice) {
-        "2" { return "both" }
-        "3" { return "translate_only" }
-        default { return "transcribe" }
-    }
-}
-
-function Show-FileList {
-    param([string[]]$Files)
-
-    Write-Host "  Fisiere gasite:" -ForegroundColor White
-    Write-Separator
-    $index = 1
-    foreach ($file in $Files) {
-        $ext = [System.IO.Path]::GetExtension($file).ToLower()
-        $name = [System.IO.Path]::GetFileName($file)
-        $size = (Get-Item $file).Length / 1MB
-        $sizeStr = "{0:N1} MB" -f $size
-
-        if ($ext -in $script:SUPPORTED_VIDEO_EXTENSIONS) {
-            $icon = "[V]"
-            $color = "Magenta"
-        }
-        else {
-            $icon = "[A]"
-            $color = "Green"
-        }
-        Write-Host "  $icon " -NoNewline
-        Write-Host "[$index] " -ForegroundColor DarkGray -NoNewline
-        Write-Host "$name" -ForegroundColor $color -NoNewline
-        Write-Host " ($sizeStr)" -ForegroundColor DarkGray
-        $index++
-    }
-    Write-Separator
-    Write-Host "  Total: $($Files.Count) fisier(e)" -ForegroundColor Yellow
-    Write-Host ""
-}
-
-function Confirm-Start {
-    param(
-        [string]$Model,
-        [string]$TranslateOption,
-        [int]$FileCount
-    )
-
-    Write-Step "4" "Confirmare si start"
-
-    Write-Host "  Configurare finala:" -ForegroundColor White
-    Write-Host "  * Model Whisper:  " -NoNewline
-    Write-Host "$Model" -ForegroundColor Cyan
-    Write-Host "  * Fisiere:        " -NoNewline
-    Write-Host "$FileCount" -ForegroundColor Cyan
-    Write-Host "  * Limba sursa:    " -NoNewline
-    Write-Host "Romana (RO)" -ForegroundColor Yellow
-    Write-Host "  * Actiune:        " -NoNewline
-    switch ($TranslateOption) {
-        "transcribe"     { Write-Host "Transcriere (subtitrari RO)" -ForegroundColor Green }
-        "both"           { Write-Host "Transcriere RO + Traducere EN" -ForegroundColor Green }
-        "translate_only" { Write-Host "Doar traducere in engleza" -ForegroundColor Green }
-    }
-    Write-Host ""
-
-    $confirm = Read-Host "  Doresti sa incepi? (D/n)"
-    return ($confirm -ne "n" -and $confirm -ne "N")
 }
 
 # ============================================================
@@ -712,11 +562,11 @@ function Optimize-SrtFile {
         [int]$SubtitleGapMs  = $script:DEFAULT_SUBTITLE_GAP_MS
     )
 
-    Write-Info "Post-procesare SRT: $(Split-Path $InputPath -Leaf)"
+    Add-LogMessage "Post-procesare SRT: $(Split-Path $InputPath -Leaf)"
 
     $subs = Parse-SrtFile -Path $InputPath
     if ($subs.Count -eq 0) {
-        Write-Warn "Fisierul SRT este gol sau invalid: $InputPath"
+        Add-LogMessage "[WARN] Fisierul SRT este gol sau invalid: $InputPath"
         Copy-Item -Path $InputPath -Destination $OutputPath -Force
         return
     }
@@ -776,7 +626,7 @@ function Optimize-SrtFile {
     }
 
     Write-SrtFile -Subtitles $merged -Path $OutputPath
-    Write-Success "Salvat $($merged.Count) subtitrari optimizate in $(Split-Path $OutputPath -Leaf)"
+    Add-LogMessage "[OK] Salvat $($merged.Count) subtitrari optimizate in $(Split-Path $OutputPath -Leaf)"
 }
 
 # ============================================================
@@ -790,40 +640,49 @@ function Convert-MediaToWav {
     )
 
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($InputFile)
-    Write-Info "Conversie audio: $baseName -> WAV (16kHz mono)"
+    Add-LogMessage "Conversie audio: $baseName -> WAV (16kHz mono)"
 
+    $outTmp = $null
+    $errTmp = $null
     try {
-        $process = Start-Process -FilePath "ffmpeg" `
-            -ArgumentList @("-y", "-i", $InputFile, "-ar", "16000", "-ac", "1", $OutputWav) `
-            -NoNewWindow -Wait -PassThru `
-            -RedirectStandardOutput "$env:TEMP\ffmpeg_out.tmp" `
-            -RedirectStandardError "$env:TEMP\ffmpeg_err.tmp" 2>$null
+        $outTmp = Join-Path $env:TEMP "ffmpeg_out_$([System.IO.Path]::GetRandomFileName()).tmp"
+        $errTmp = Join-Path $env:TEMP "ffmpeg_err_$([System.IO.Path]::GetRandomFileName()).tmp"
 
-        if ($process.ExitCode -ne 0) {
+        $proc = Start-Process -FilePath "ffmpeg" `
+            -ArgumentList @("-y", "-i", "`"$InputFile`"", "-ar", "16000", "-ac", "1", "`"$OutputWav`"") `
+            -NoNewWindow -PassThru `
+            -RedirectStandardOutput $outTmp `
+            -RedirectStandardError $errTmp 2>$null
+
+        while (-not $proc.HasExited) {
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
+        }
+
+        if ($proc.ExitCode -ne 0) {
             $errContent = ""
-            if (Test-Path "$env:TEMP\ffmpeg_err.tmp") {
-                $errContent = Get-Content "$env:TEMP\ffmpeg_err.tmp" -Raw
+            if (Test-Path $errTmp) {
+                $errContent = Get-Content $errTmp -Raw -ErrorAction SilentlyContinue
             }
-            Write-Err "FFmpeg a esuat pentru $baseName : $errContent"
+            Add-LogMessage "[ERR] FFmpeg a esuat pentru $baseName : $errContent"
             return $false
         }
 
         if (-not (Test-Path $OutputWav) -or (Get-Item $OutputWav).Length -eq 0) {
-            Write-Err "Fisierul WAV nu a fost creat corect: $OutputWav"
+            Add-LogMessage "[ERR] Fisierul WAV nu a fost creat corect: $OutputWav"
             return $false
         }
 
-        Write-Success "Conversie completata: $baseName"
+        Add-LogMessage "[OK] Conversie completata: $baseName"
         return $true
     }
     catch {
-        Write-Err "Eroare FFmpeg: $_"
+        Add-LogMessage "[ERR] Eroare FFmpeg: $_"
         return $false
     }
     finally {
-        # Clean up temp files
-        Remove-Item "$env:TEMP\ffmpeg_out.tmp" -ErrorAction SilentlyContinue
-        Remove-Item "$env:TEMP\ffmpeg_err.tmp" -ErrorAction SilentlyContinue
+        if ($outTmp) { Remove-Item $outTmp -ErrorAction SilentlyContinue }
+        if ($errTmp) { Remove-Item $errTmp -ErrorAction SilentlyContinue }
     }
 }
 
@@ -841,60 +700,59 @@ function Invoke-WhisperTranscription {
     if (-not $whisperModelName) { $whisperModelName = $ModelName }
 
     $taskDesc = if ($Task -eq "translate") { "Traducere (RO->EN)" } else { "Transcriere (RO)" }
-    Write-Info "$taskDesc : $baseName (model: $whisperModelName)"
+    Add-LogMessage "$taskDesc : $baseName (model: $whisperModelName)"
 
     $argList = @(
-        $WavFile
+        "`"$WavFile`""
         "--model", $whisperModelName
         "--language", $Language
         "--task", $Task
         "--output_format", "srt"
-        "--output_dir", $OutputDir
+        "--output_dir", "`"$OutputDir`""
     )
 
+    $outTmp = $null
+    $errTmp = $null
     try {
-        if ($script:WhisperCommand -match " ") {
-            # e.g., "python -m whisper"
-            $parts = $script:WhisperCommand -split " ", 2
-            $exe = $parts[0]
-            $preArgs = $parts[1] -split " "
-            $fullArgs = $preArgs + $argList
-            $process = Start-Process -FilePath $exe -ArgumentList $fullArgs `
-                -NoNewWindow -Wait -PassThru `
-                -RedirectStandardOutput "$env:TEMP\whisper_out.tmp" `
-                -RedirectStandardError "$env:TEMP\whisper_err.tmp" 2>$null
-        }
-        else {
-            $process = Start-Process -FilePath $script:WhisperCommand -ArgumentList $argList `
-                -NoNewWindow -Wait -PassThru `
-                -RedirectStandardOutput "$env:TEMP\whisper_out.tmp" `
-                -RedirectStandardError "$env:TEMP\whisper_err.tmp" 2>$null
+        $outTmp = Join-Path $env:TEMP "whisper_out_$([System.IO.Path]::GetRandomFileName()).tmp"
+        $errTmp = Join-Path $env:TEMP "whisper_err_$([System.IO.Path]::GetRandomFileName()).tmp"
+
+        $fullArgs = $script:WhisperArgs + $argList
+        $proc = Start-Process -FilePath $script:WhisperExe -ArgumentList $fullArgs `
+            -NoNewWindow -PassThru `
+            -RedirectStandardOutput $outTmp `
+            -RedirectStandardError $errTmp 2>$null
+
+        while (-not $proc.HasExited) {
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 100
         }
 
         $expectedSrt = Join-Path $OutputDir "$baseName.srt"
         if (Test-Path $expectedSrt) {
-            Write-Success "$taskDesc completata: $baseName"
+            Add-LogMessage "[OK] $taskDesc completata: $baseName"
             return $expectedSrt
         }
         else {
             $errContent = ""
-            if (Test-Path "$env:TEMP\whisper_err.tmp") {
-                $errContent = Get-Content "$env:TEMP\whisper_err.tmp" -Raw -ErrorAction SilentlyContinue
+            if (Test-Path $errTmp) {
+                $errContent = Get-Content $errTmp -Raw -ErrorAction SilentlyContinue
             }
-            Write-Err "Whisper nu a generat SRT pentru $baseName"
+            Add-LogMessage "[ERR] Whisper nu a generat SRT pentru $baseName"
             if ($errContent -and $errContent.Length -gt 0) {
-                Write-Err "Detalii: $($errContent.Substring(0, [math]::Min(500, $errContent.Length)))"
+                $snippet = $errContent.Substring(0, [math]::Min(500, $errContent.Length))
+                Add-LogMessage "[ERR] Detalii: $snippet"
             }
             return $null
         }
     }
     catch {
-        Write-Err "Eroare Whisper: $_"
+        Add-LogMessage "[ERR] Eroare Whisper: $_"
         return $null
     }
     finally {
-        Remove-Item "$env:TEMP\whisper_out.tmp" -ErrorAction SilentlyContinue
-        Remove-Item "$env:TEMP\whisper_err.tmp" -ErrorAction SilentlyContinue
+        if ($outTmp) { Remove-Item $outTmp -ErrorAction SilentlyContinue }
+        if ($errTmp) { Remove-Item $errTmp -ErrorAction SilentlyContinue }
     }
 }
 
@@ -911,11 +769,7 @@ function Process-SingleFile {
     $ext      = [System.IO.Path]::GetExtension($InputFile).ToLower()
     $wavFile  = Join-Path $TempDir "$baseName.wav"
 
-    Write-Host ""
-    Write-Separator
-    Write-Host "  Procesare: " -NoNewline
-    Write-Host "$baseName$ext" -ForegroundColor Yellow
-    Write-Separator
+    Add-LogMessage "--- Procesare: $baseName$ext ---"
 
     # Step 1: Convert to WAV
     $convOk = Convert-MediaToWav -InputFile $InputFile -OutputWav $wavFile
@@ -940,7 +794,7 @@ function Process-SingleFile {
                 $results += "RO: $finalSrt"
             }
             catch {
-                Write-Warn "Post-procesare esuata, se copiaza SRT raw: $_"
+                Add-LogMessage "[WARN] Post-procesare esuata, se copiaza SRT raw: $_"
                 Copy-Item -Path $rawSrt -Destination $finalSrt -Force
                 $results += "RO (raw): $finalSrt"
             }
@@ -967,7 +821,7 @@ function Process-SingleFile {
                 $results += "EN: $finalSrtEn"
             }
             catch {
-                Write-Warn "Post-procesare traducere esuata: $_"
+                Add-LogMessage "[WARN] Post-procesare traducere esuata: $_"
                 Copy-Item -Path $rawSrtEn -Destination $finalSrtEn -Force
                 $results += "EN (raw): $finalSrtEn"
             }
@@ -979,7 +833,7 @@ function Process-SingleFile {
                 return @{ Status = "failed"; File = $InputFile; Reason = "Traducere esuata" }
             }
             else {
-                Write-Warn "Traducerea in engleza a esuat pentru $baseName"
+                Add-LogMessage "[WARN] Traducerea in engleza a esuat pentru $baseName"
             }
         }
     }
@@ -992,194 +846,406 @@ function Process-SingleFile {
 }
 
 # ============================================================
-# MAIN WORKFLOW
+# GUI
 # ============================================================
 
-function Start-Transcription {
-    Show-Banner
+function Show-MainForm {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
 
-    # Version flag
-    if ($ShowVersion) {
-        Write-Host "  Transcriber PowerShell $script:VERSION" -ForegroundColor Cyan
-        return
-    }
+    [System.Windows.Forms.Application]::EnableVisualStyles()
 
-    # Init flag
-    if ($Init) {
-        $cfg = Get-DefaultConfig
-        Save-ConfigYaml -Config $cfg -Path $ConfigFile
-        Write-Success "Fisierul '$ConfigFile' a fost creat cu valori implicite."
-        return
-    }
+    # --- Main Form ---
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Transcriber PowerShell $script:VERSION"
+    $form.Size = New-Object System.Drawing.Size(870, 820)
+    $form.StartPosition = "CenterScreen"
+    $form.FormBorderStyle = "FixedSingle"
+    $form.MaximizeBox = $false
 
-    # Check dependencies
-    if (-not (Test-Dependencies)) {
-        Write-Host ""
-        Write-Err "Dependente lipsa. Rezolva problemele de mai sus si reincearca."
-        return
-    }
+    # --- Title Label ---
+    $lblTitle = New-Object System.Windows.Forms.Label
+    $lblTitle.Text = "TRANSCRIBER PowerShell $script:VERSION - Audio & Video -> Subtitles (.srt)"
+    $lblTitle.Font = New-Object System.Drawing.Font("Segoe UI", 14, [System.Drawing.FontStyle]::Bold)
+    $lblTitle.ForeColor = [System.Drawing.Color]::DarkCyan
+    $lblTitle.AutoSize = $true
+    $lblTitle.Location = New-Object System.Drawing.Point(15, 12)
+    $form.Controls.Add($lblTitle)
 
-    # Load config
-    $config = Load-Config -Path $ConfigFile
+    # --- Configuration GroupBox ---
+    $grpConfig = New-Object System.Windows.Forms.GroupBox
+    $grpConfig.Text = "Configurare"
+    $grpConfig.Location = New-Object System.Drawing.Point(15, 48)
+    $grpConfig.Size = New-Object System.Drawing.Size(822, 155)
+    $form.Controls.Add($grpConfig)
 
-    # Step 1: Select directory
-    $workDir = Select-WorkingDirectory
-    Write-Success "Director selectat: $workDir"
+    # Directory row
+    $lblDir = New-Object System.Windows.Forms.Label
+    $lblDir.Text = "Director:"
+    $lblDir.Location = New-Object System.Drawing.Point(12, 28)
+    $lblDir.AutoSize = $true
+    $grpConfig.Controls.Add($lblDir)
 
-    # Find media files
-    $mediaFiles = @()
-    foreach ($ext in $script:SUPPORTED_EXTENSIONS) {
-        $pattern = Join-Path $workDir "*$ext"
-        $found = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
-        if ($found) {
-            $mediaFiles += $found.FullName
+    $txtDir = New-Object System.Windows.Forms.TextBox
+    $txtDir.Location = New-Object System.Drawing.Point(90, 25)
+    $txtDir.Size = New-Object System.Drawing.Size(610, 22)
+    $txtDir.Text = (Get-Location).Path
+    $grpConfig.Controls.Add($txtDir)
+
+    $btnBrowse = New-Object System.Windows.Forms.Button
+    $btnBrowse.Text = "Alege..."
+    $btnBrowse.Location = New-Object System.Drawing.Point(710, 23)
+    $btnBrowse.Size = New-Object System.Drawing.Size(100, 26)
+    $grpConfig.Controls.Add($btnBrowse)
+
+    $btnBrowse.Add_Click({
+        $fbd = New-Object System.Windows.Forms.FolderBrowserDialog
+        $fbd.Description = "Selecteaza directorul cu fisiere media"
+        $fbd.SelectedPath = $txtDir.Text
+        if ($fbd.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $txtDir.Text = $fbd.SelectedPath
         }
+    })
+
+    # Model row
+    $lblModel = New-Object System.Windows.Forms.Label
+    $lblModel.Text = "Model Whisper:"
+    $lblModel.Location = New-Object System.Drawing.Point(12, 63)
+    $lblModel.AutoSize = $true
+    $grpConfig.Controls.Add($lblModel)
+
+    $cmbModel = New-Object System.Windows.Forms.ComboBox
+    $cmbModel.DropDownStyle = "DropDownList"
+    $cmbModel.Location = New-Object System.Drawing.Point(120, 60)
+    $cmbModel.Size = New-Object System.Drawing.Size(180, 22)
+    foreach ($m in $script:MODEL_LIST) {
+        [void]$cmbModel.Items.Add($m)
     }
+    $cmbModel.SelectedItem = "small"
+    $grpConfig.Controls.Add($cmbModel)
 
-    if ($mediaFiles.Count -eq 0) {
-        Write-Host ""
-        Write-Err "Nu s-au gasit fisiere media in directorul selectat."
-        Write-Host "  Formate suportate: " -NoNewline
-        Write-Host ($script:SUPPORTED_EXTENSIONS -join ", ") -ForegroundColor Yellow
-        return
-    }
+    # Action row
+    $lblAction = New-Object System.Windows.Forms.Label
+    $lblAction.Text = "Actiune:"
+    $lblAction.Location = New-Object System.Drawing.Point(340, 63)
+    $lblAction.AutoSize = $true
+    $grpConfig.Controls.Add($lblAction)
 
-    # Show found files
-    Write-Host ""
-    Show-FileList -Files $mediaFiles
+    $cmbAction = New-Object System.Windows.Forms.ComboBox
+    $cmbAction.DropDownStyle = "DropDownList"
+    $cmbAction.Location = New-Object System.Drawing.Point(410, 60)
+    $cmbAction.Size = New-Object System.Drawing.Size(250, 22)
+    [void]$cmbAction.Items.Add("Doar transcriere (RO)")
+    [void]$cmbAction.Items.Add("Transcriere RO + Traducere EN")
+    [void]$cmbAction.Items.Add("Doar traducere EN")
+    $cmbAction.SelectedIndex = 0
+    $grpConfig.Controls.Add($cmbAction)
 
-    # Step 2: Select model
-    $model = Select-WhisperModel
-    Write-Success "Model selectat: $model"
+    # Scan button
+    $btnScan = New-Object System.Windows.Forms.Button
+    $btnScan.Text = "Scaneaza Fisiere"
+    $btnScan.Location = New-Object System.Drawing.Point(12, 100)
+    $btnScan.Size = New-Object System.Drawing.Size(150, 30)
+    $grpConfig.Controls.Add($btnScan)
 
-    # Step 3: Translation option
-    $translateOption = Select-TranslationOption
-    Write-Success "Optiune selectata: $translateOption"
+    # --- Found Files GroupBox ---
+    $grpFiles = New-Object System.Windows.Forms.GroupBox
+    $grpFiles.Text = "Fisiere gasite"
+    $grpFiles.Location = New-Object System.Drawing.Point(15, 210)
+    $grpFiles.Size = New-Object System.Drawing.Size(822, 170)
+    $form.Controls.Add($grpFiles)
 
-    # Step 4: Confirm
-    if (-not (Confirm-Start -Model $model -TranslateOption $translateOption -FileCount $mediaFiles.Count)) {
-        Write-Warn "Operatiune anulata de utilizator."
-        return
-    }
+    $lstFiles = New-Object System.Windows.Forms.ListBox
+    $lstFiles.Location = New-Object System.Drawing.Point(12, 20)
+    $lstFiles.Size = New-Object System.Drawing.Size(798, 140)
+    $lstFiles.HorizontalScrollbar = $true
+    $grpFiles.Controls.Add($lstFiles)
 
-    # Setup temp directory
-    $tempDir = Join-Path $workDir $config.temp_dir
-    if (-not (Test-Path $tempDir)) {
-        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-    }
+    # --- Buttons Row ---
+    $btnStart = New-Object System.Windows.Forms.Button
+    $btnStart.Text = "Start Transcriere"
+    $btnStart.Location = New-Object System.Drawing.Point(15, 390)
+    $btnStart.Size = New-Object System.Drawing.Size(150, 35)
+    $btnStart.Enabled = $false
+    $form.Controls.Add($btnStart)
 
-    # Load recovery
-    $recovery = Load-Recovery
+    $btnExit = New-Object System.Windows.Forms.Button
+    $btnExit.Text = "Iesire"
+    $btnExit.Location = New-Object System.Drawing.Point(737, 390)
+    $btnExit.Size = New-Object System.Drawing.Size(100, 35)
+    $form.Controls.Add($btnExit)
 
-    # Filter already completed
-    $toProcess = @()
-    foreach ($file in $mediaFiles) {
-        $recoveryProp = $file -replace "\\", "/" # Normalize path for JSON
-        $recoveryStatus = $null
-        if ($recovery.PSObject.Properties.Name -contains $recoveryProp) {
-            $recoveryStatus = $recovery.$recoveryProp
+    $btnExit.Add_Click({ $form.Close() })
+
+    # --- Progress ---
+    $progressBar = New-Object System.Windows.Forms.ProgressBar
+    $progressBar.Location = New-Object System.Drawing.Point(15, 435)
+    $progressBar.Size = New-Object System.Drawing.Size(700, 22)
+    $progressBar.Minimum = 0
+    $progressBar.Maximum = 100
+    $progressBar.Value = 0
+    $form.Controls.Add($progressBar)
+
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.Text = "Gata."
+    $lblStatus.Location = New-Object System.Drawing.Point(722, 437)
+    $lblStatus.Size = New-Object System.Drawing.Size(115, 20)
+    $lblStatus.AutoSize = $false
+    $form.Controls.Add($lblStatus)
+
+    # --- Log GroupBox ---
+    $grpLog = New-Object System.Windows.Forms.GroupBox
+    $grpLog.Text = "Jurnal"
+    $grpLog.Location = New-Object System.Drawing.Point(15, 465)
+    $grpLog.Size = New-Object System.Drawing.Size(822, 300)
+    $form.Controls.Add($grpLog)
+
+    $txtLog = New-Object System.Windows.Forms.TextBox
+    $txtLog.Multiline = $true
+    $txtLog.ReadOnly = $true
+    $txtLog.ScrollBars = "Both"
+    $txtLog.WordWrap = $false
+    $txtLog.Location = New-Object System.Drawing.Point(12, 20)
+    $txtLog.Size = New-Object System.Drawing.Size(798, 270)
+    $txtLog.Font = New-Object System.Drawing.Font("Consolas", 9)
+    $grpLog.Controls.Add($txtLog)
+
+    # --- Timer for log buffer ---
+    $timer = New-Object System.Windows.Forms.Timer
+    $timer.Interval = 250
+    $timer.Add_Tick({
+        if ($script:LogBuffer.Count -gt 0) {
+            $snapshot = $script:LogBuffer.ToArray()
+            $script:LogBuffer.Clear()
+            foreach ($line in $snapshot) {
+                $txtLog.AppendText("$line`r`n")
+            }
         }
-        if ($recoveryStatus -ne "completed") {
-            $toProcess += $file
+    })
+    $timer.Start()
+
+    # --- Scan logic ---
+    $script:MediaFiles = @()
+
+    $btnScan.Add_Click({
+        $lstFiles.Items.Clear()
+        $script:MediaFiles = @()
+        $dir = $txtDir.Text
+        if (-not (Test-Path $dir -PathType Container)) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Directorul nu exista: $dir",
+                "Eroare",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+            return
         }
-    }
-
-    if ($toProcess.Count -eq 0) {
-        Write-Success "Toate fisierele au fost deja procesate!"
-        Write-Host "  Sterge '$($script:RECOVERY_FILE)' pentru a reprocesa." -ForegroundColor DarkGray
-        return
-    }
-
-    if ($toProcess.Count -lt $mediaFiles.Count) {
-        $skip = $mediaFiles.Count - $toProcess.Count
-        Write-Info "Se sar $skip fisier(e) deja procesate. $($toProcess.Count) de procesat."
-    }
-
-    # Processing
-    Write-Host ""
-    Write-Host "  +==============================================================+" -ForegroundColor Green
-    Write-Host "  |              PROCESARE IN CURS...                           |" -ForegroundColor Green
-    Write-Host "  +==============================================================+" -ForegroundColor Green
-    Write-Host ""
-
-    $startTime = Get-Date
-    $completed = 0
-    $failed    = 0
-
-    for ($idx = 0; $idx -lt $toProcess.Count; $idx++) {
-        $file = $toProcess[$idx]
-        Show-Progress -Current ($idx) -Total $toProcess.Count -FileName (Split-Path $file -Leaf)
-
-        $result = Process-SingleFile -InputFile $file -TempDir $tempDir `
-            -ModelName $model -TranslateOption $translateOption `
-            -PostprocessConfig $config.postprocess
-
-        if ($result.Status -eq "completed") {
-            $completed++
-            Write-Host ""
-            Write-Host "  [OK] " -ForegroundColor Green -NoNewline
-            Write-Host "Finalizat: $(Split-Path $result.File -Leaf)" -NoNewline
-            Write-Host " ($($result.Reason))" -ForegroundColor DarkGray
+        Add-LogMessage "Scanare director: $dir"
+        foreach ($ext in $script:SUPPORTED_EXTENSIONS) {
+            $pattern = Join-Path $dir "*$ext"
+            $found = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
+            if ($found) {
+                $script:MediaFiles += $found.FullName
+            }
         }
-        else {
-            $failed++
-            Write-Host ""
-            Write-Host "  [X] " -ForegroundColor Red -NoNewline
-            Write-Host "Esuat: $(Split-Path $result.File -Leaf)" -NoNewline
-            Write-Host " ($($result.Reason))" -ForegroundColor DarkGray
+        if ($script:MediaFiles.Count -eq 0) {
+            Add-LogMessage "[WARN] Nu s-au gasit fisiere media."
+            $btnStart.Enabled = $false
+            [System.Windows.Forms.MessageBox]::Show(
+                "Nu s-au gasit fisiere media in directorul selectat.`nFormate: $($script:SUPPORTED_EXTENSIONS -join ', ')",
+                "Niciun fisier",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            )
+            return
+        }
+        foreach ($f in $script:MediaFiles) {
+            $fName = [System.IO.Path]::GetFileName($f)
+            $fExt  = [System.IO.Path]::GetExtension($f).ToLower()
+            $sz = 0
+            try { $sz = (Get-Item $f).Length / 1MB } catch { Add-LogMessage "[WARN] Nu pot citi marimea: $f" }
+            $sizeStr = "{0:N1} MB" -f $sz
+            $tag = if ($fExt -in $script:SUPPORTED_VIDEO_EXTENSIONS) { "[V]" } else { "[A]" }
+            [void]$lstFiles.Items.Add("$tag $fName ($sizeStr)")
+        }
+        Add-LogMessage "[OK] Gasite $($script:MediaFiles.Count) fisier(e)."
+        $btnStart.Enabled = $true
+    })
+
+    # --- Start transcription logic ---
+    $btnStart.Add_Click({
+        # Disable controls during processing
+        $btnStart.Enabled  = $false
+        $btnScan.Enabled   = $false
+        $cmbModel.Enabled  = $false
+        $cmbAction.Enabled = $false
+        $txtDir.Enabled    = $false
+        $btnBrowse.Enabled = $false
+        $progressBar.Value = 0
+
+        $model = $cmbModel.SelectedItem.ToString()
+        $actionIdx = $cmbAction.SelectedIndex
+        $translateOption = switch ($actionIdx) {
+            0 { "transcribe" }
+            1 { "both" }
+            2 { "translate_only" }
+            default { "transcribe" }
         }
 
-        # Update recovery
-        $recoveryProp = $file -replace "\\", "/"
-        $recovery | Add-Member -NotePropertyName $recoveryProp -NotePropertyValue $result.Status -Force
-        Save-Recovery -State $recovery
+        Add-LogMessage "=== Start transcriere ==="
+        Add-LogMessage "Model: $model | Actiune: $($cmbAction.SelectedItem) | Fisiere: $($script:MediaFiles.Count)"
 
-        Show-Progress -Current ($idx + 1) -Total $toProcess.Count -FileName ""
-    }
+        # Check dependencies
+        $lblStatus.Text = "Verificare..."
+        [System.Windows.Forms.Application]::DoEvents()
 
-    # Cleanup temp dir
-    if (Test-Path $tempDir) {
-        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
+        if (-not (Test-Dependencies)) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Dependente lipsa. Verificati jurnalul.",
+                "Eroare dependente",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            )
+            $btnStart.Enabled  = $true
+            $btnScan.Enabled   = $true
+            $cmbModel.Enabled  = $true
+            $cmbAction.Enabled = $true
+            $txtDir.Enabled    = $true
+            $btnBrowse.Enabled = $true
+            $lblStatus.Text    = "Eroare."
+            return
+        }
 
-    # Cleanup recovery if all succeeded
-    if ($failed -eq 0 -and (Test-Path $script:RECOVERY_FILE)) {
-        Remove-Item $script:RECOVERY_FILE -Force -ErrorAction SilentlyContinue
-        Write-Info "Recovery file sters (toate fisierele procesate cu succes)."
-    }
+        $config  = Load-Config -Path $ConfigFile
+        $workDir = $txtDir.Text
+        $tempDir = Join-Path $workDir $config.temp_dir
+        if (-not (Test-Path $tempDir)) {
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+        }
 
-    # Summary
-    $elapsed = (Get-Date) - $startTime
-    $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
+        # Load recovery state
+        $recovery  = Load-Recovery
+        $toProcess = @()
+        foreach ($file in $script:MediaFiles) {
+            $recoveryProp = $file -replace "\\", "/"
+            $recoveryStatus = $null
+            if ($recovery.PSObject.Properties.Name -contains $recoveryProp) {
+                $recoveryStatus = $recovery.$recoveryProp
+            }
+            if ($recoveryStatus -ne "completed") {
+                $toProcess += $file
+            }
+        }
 
-    Write-Host ""
-    Write-Host ""
-    Write-Host "  +==============================================================+" -ForegroundColor Cyan
-    Write-Host "  |                     REZUMAT PROCESARE                       |" -ForegroundColor Cyan
-    Write-Host "  +==============================================================+" -ForegroundColor Cyan
-    Write-Host "  |  Total fisiere:      " -ForegroundColor Cyan -NoNewline
-    Write-Host ("{0,-38}" -f $toProcess.Count) -NoNewline
-    Write-Host "|" -ForegroundColor Cyan
-    Write-Host "  |  Finalizate:         " -ForegroundColor Cyan -NoNewline
-    Write-Host ("{0,-38}" -f $completed) -ForegroundColor Green -NoNewline
-    Write-Host "|" -ForegroundColor Cyan
-    Write-Host "  |  Esuate:             " -ForegroundColor Cyan -NoNewline
-    $failColor = if ($failed -gt 0) { "Red" } else { "Green" }
-    Write-Host ("{0,-38}" -f $failed) -ForegroundColor $failColor -NoNewline
-    Write-Host "|" -ForegroundColor Cyan
-    Write-Host "  |  Durata:             " -ForegroundColor Cyan -NoNewline
-    Write-Host ("{0,-38}" -f $elapsedStr) -ForegroundColor Yellow -NoNewline
-    Write-Host "|" -ForegroundColor Cyan
-    Write-Host "  +==============================================================+" -ForegroundColor Cyan
-    Write-Host ""
+        if ($toProcess.Count -eq 0) {
+            Add-LogMessage "[OK] Toate fisierele au fost deja procesate!"
+            Add-LogMessage "Sterge '$($script:RECOVERY_FILE)' pentru a reprocesa."
+            $lblStatus.Text    = "Finalizat."
+            $btnStart.Enabled  = $true
+            $btnScan.Enabled   = $true
+            $cmbModel.Enabled  = $true
+            $cmbAction.Enabled = $true
+            $txtDir.Enabled    = $true
+            $btnBrowse.Enabled = $true
+            return
+        }
 
-    if ($completed -gt 0) {
-        Write-Success "Fisierele .srt au fost salvate in directorul: $workDir"
-    }
-    Write-Host ""
+        if ($toProcess.Count -lt $script:MediaFiles.Count) {
+            $skip = $script:MediaFiles.Count - $toProcess.Count
+            Add-LogMessage "[INFO] Se sar $skip fisier(e) deja procesate."
+        }
+
+        $progressBar.Maximum = $toProcess.Count
+        $progressBar.Value   = 0
+
+        $startTime = Get-Date
+        $completed = 0
+        $failed    = 0
+
+        for ($idx = 0; $idx -lt $toProcess.Count; $idx++) {
+            $file  = $toProcess[$idx]
+            $fname = Split-Path $file -Leaf
+            $lblStatus.Text = "$($idx + 1)/$($toProcess.Count)"
+            [System.Windows.Forms.Application]::DoEvents()
+
+            $result = Process-SingleFile -InputFile $file -TempDir $tempDir `
+                -ModelName $model -TranslateOption $translateOption `
+                -PostprocessConfig $config.postprocess
+
+            if ($result.Status -eq "completed") {
+                $completed++
+                Add-LogMessage "[OK] Finalizat: $fname ($($result.Reason))"
+            }
+            else {
+                $failed++
+                Add-LogMessage "[ERR] Esuat: $fname ($($result.Reason))"
+            }
+
+            # Update recovery
+            $recoveryProp = $file -replace "\\", "/"
+            $recovery | Add-Member -NotePropertyName $recoveryProp -NotePropertyValue $result.Status -Force
+            Save-Recovery -State $recovery
+
+            $progressBar.Value = $idx + 1
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+
+        # Cleanup temp dir
+        if (Test-Path $tempDir) {
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        # Cleanup recovery if all succeeded
+        if ($failed -eq 0 -and (Test-Path $script:RECOVERY_FILE)) {
+            Remove-Item $script:RECOVERY_FILE -Force -ErrorAction SilentlyContinue
+            Add-LogMessage "[INFO] Recovery file sters (toate procesate cu succes)."
+        }
+
+        # Summary
+        $elapsed    = (Get-Date) - $startTime
+        $elapsedStr = "{0:hh\:mm\:ss}" -f $elapsed
+
+        Add-LogMessage "=== REZUMAT ==="
+        Add-LogMessage "Total: $($toProcess.Count) | Finalizate: $completed | Esuate: $failed | Durata: $elapsedStr"
+        if ($completed -gt 0) {
+            Add-LogMessage "[OK] Fisierele .srt au fost salvate in: $workDir"
+        }
+
+        $lblStatus.Text    = "Finalizat."
+        $btnStart.Enabled  = $true
+        $btnScan.Enabled   = $true
+        $cmbModel.Enabled  = $true
+        $cmbAction.Enabled = $true
+        $txtDir.Enabled    = $true
+        $btnBrowse.Enabled = $true
+
+        [System.Windows.Forms.MessageBox]::Show(
+            "Procesare completa!`nFinalizate: $completed`nEsuate: $failed`nDurata: $elapsedStr",
+            "Rezumat",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+    })
+
+    # Show form
+    [void]$form.ShowDialog()
+    $timer.Stop()
+    $timer.Dispose()
+    $form.Dispose()
 }
 
 # ============================================================
 # ENTRY POINT
 # ============================================================
-Start-Transcription
+
+if ($ShowVersion) {
+    Write-Host "Transcriber PowerShell $script:VERSION"
+}
+elseif ($Init) {
+    $cfg = Get-DefaultConfig
+    Save-ConfigYaml -Config $cfg -Path $ConfigFile
+    Write-Host "[OK] Fisierul '$ConfigFile' a fost creat cu valori implicite."
+}
+else {
+    Show-MainForm
+}
