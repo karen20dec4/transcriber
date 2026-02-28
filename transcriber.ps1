@@ -141,7 +141,7 @@ function Test-Dependencies {
     foreach ($cmd in @("python", "python3", "py")) {
         try {
             $result = & $cmd --version 2>&1
-            if ($LASTEXITCODE -eq 0 -or $result -match "Python 3") {
+            if ($LASTEXITCODE -eq 0 -and $result -match "Python 3") {
                 $pythonCmd = $cmd
                 break
             }
@@ -275,7 +275,7 @@ function Load-Config {
         return $cfg
     }
     catch {
-        Write-Warn "Eroare la citirea config: $_. Se folosesc valorile implicite."
+        Write-Warn "Eroare la citirea configurarii: $($_.Exception.Message). Se folosesc valorile implicite."
         return $default
     }
 }
@@ -538,8 +538,7 @@ function Split-CustomText {
     }
 
     # Safety: ensure splitIdx is valid
-    if ($splitIdx -le 0) { $splitIdx = $pref }
-    if ($splitIdx -ge $Text.Length) { $splitIdx = $pref }
+    if ($splitIdx -le 0 -or $splitIdx -ge $Text.Length) { $splitIdx = $pref }
 
     $left  = $Text.Substring(0, $splitIdx).Trim()
     $right = $Text.Substring($splitIdx).Trim()
@@ -795,7 +794,7 @@ function Convert-MediaToWav {
 
     try {
         $process = Start-Process -FilePath "ffmpeg" `
-            -ArgumentList "-y", "-i", "`"$InputFile`"", "-ar", "16000", "-ac", "1", "`"$OutputWav`"" `
+            -ArgumentList @("-y", "-i", $InputFile, "-ar", "16000", "-ac", "1", $OutputWav) `
             -NoNewWindow -Wait -PassThru `
             -RedirectStandardOutput "$env:TEMP\ffmpeg_out.tmp" `
             -RedirectStandardError "$env:TEMP\ffmpeg_err.tmp" 2>$null
@@ -845,12 +844,12 @@ function Invoke-WhisperTranscription {
     Write-Info "$taskDesc : $baseName (model: $whisperModelName)"
 
     $argList = @(
-        "`"$WavFile`""
+        $WavFile
         "--model", $whisperModelName
         "--language", $Language
         "--task", $Task
         "--output_format", "srt"
-        "--output_dir", "`"$OutputDir`""
+        "--output_dir", $OutputDir
     )
 
     try {
@@ -883,7 +882,7 @@ function Invoke-WhisperTranscription {
                 $errContent = Get-Content "$env:TEMP\whisper_err.tmp" -Raw -ErrorAction SilentlyContinue
             }
             Write-Err "Whisper nu a generat SRT pentru $baseName"
-            if ($errContent) {
+            if ($errContent -and $errContent.Length -gt 0) {
                 Write-Err "Detalii: $($errContent.Substring(0, [math]::Min(500, $errContent.Length)))"
             }
             return $null
