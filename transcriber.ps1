@@ -7,7 +7,7 @@
     Features: model selection, Romanian-to-English translation, SRT optimization.
     GUI mode using Windows Forms.
 .NOTES
-    Version: v1.0-ps1
+    Version: v2.0-gui
     Requires: Python 3, openai-whisper, ffmpeg
 #>
 
@@ -21,7 +21,7 @@ param(
 # ============================================================
 # CONFIGURATION
 # ============================================================
-$script:VERSION = "v1.0-ps1"
+$script:VERSION = "v2.0-gui"
 $script:RECOVERY_FILE = "recovery.json"
 
 $script:SUPPORTED_AUDIO_EXTENSIONS = @(".mp3")
@@ -858,7 +858,7 @@ function Show-MainForm {
     # --- Main Form ---
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Transcriber PowerShell $script:VERSION"
-    $form.Size = New-Object System.Drawing.Size(870, 820)
+    $form.Size = New-Object System.Drawing.Size(870, 840)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedSingle"
     $form.MaximizeBox = $false
@@ -872,10 +872,18 @@ function Show-MainForm {
     $lblTitle.Location = New-Object System.Drawing.Point(15, 12)
     $form.Controls.Add($lblTitle)
 
+    $lblSubtitle = New-Object System.Windows.Forms.Label
+    $lblSubtitle.Text = "Powered by OpenAI Whisper + FFmpeg"
+    $lblSubtitle.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+    $lblSubtitle.ForeColor = [System.Drawing.Color]::Gray
+    $lblSubtitle.AutoSize = $true
+    $lblSubtitle.Location = New-Object System.Drawing.Point(15, 38)
+    $form.Controls.Add($lblSubtitle)
+
     # --- Configuration GroupBox ---
     $grpConfig = New-Object System.Windows.Forms.GroupBox
     $grpConfig.Text = "Configurare"
-    $grpConfig.Location = New-Object System.Drawing.Point(15, 48)
+    $grpConfig.Location = New-Object System.Drawing.Point(15, 58)
     $grpConfig.Size = New-Object System.Drawing.Size(822, 155)
     $form.Controls.Add($grpConfig)
 
@@ -946,12 +954,15 @@ function Show-MainForm {
     $btnScan.Text = "Scaneaza Fisiere"
     $btnScan.Location = New-Object System.Drawing.Point(12, 100)
     $btnScan.Size = New-Object System.Drawing.Size(150, 30)
+    $btnScan.BackColor = [System.Drawing.Color]::SteelBlue
+    $btnScan.ForeColor = [System.Drawing.Color]::White
+    $btnScan.FlatStyle = "Flat"
     $grpConfig.Controls.Add($btnScan)
 
     # --- Found Files GroupBox ---
     $grpFiles = New-Object System.Windows.Forms.GroupBox
     $grpFiles.Text = "Fisiere gasite"
-    $grpFiles.Location = New-Object System.Drawing.Point(15, 210)
+    $grpFiles.Location = New-Object System.Drawing.Point(15, 220)
     $grpFiles.Size = New-Object System.Drawing.Size(822, 170)
     $form.Controls.Add($grpFiles)
 
@@ -964,14 +975,18 @@ function Show-MainForm {
     # --- Buttons Row ---
     $btnStart = New-Object System.Windows.Forms.Button
     $btnStart.Text = "Start Transcriere"
-    $btnStart.Location = New-Object System.Drawing.Point(15, 390)
+    $btnStart.Location = New-Object System.Drawing.Point(15, 400)
     $btnStart.Size = New-Object System.Drawing.Size(150, 35)
     $btnStart.Enabled = $false
+    $btnStart.BackColor = [System.Drawing.Color]::ForestGreen
+    $btnStart.ForeColor = [System.Drawing.Color]::White
+    $btnStart.FlatStyle = "Flat"
+    $btnStart.Font = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($btnStart)
 
     $btnExit = New-Object System.Windows.Forms.Button
     $btnExit.Text = "Iesire"
-    $btnExit.Location = New-Object System.Drawing.Point(737, 390)
+    $btnExit.Location = New-Object System.Drawing.Point(737, 400)
     $btnExit.Size = New-Object System.Drawing.Size(100, 35)
     $form.Controls.Add($btnExit)
 
@@ -979,7 +994,7 @@ function Show-MainForm {
 
     # --- Progress ---
     $progressBar = New-Object System.Windows.Forms.ProgressBar
-    $progressBar.Location = New-Object System.Drawing.Point(15, 435)
+    $progressBar.Location = New-Object System.Drawing.Point(15, 445)
     $progressBar.Size = New-Object System.Drawing.Size(700, 22)
     $progressBar.Minimum = 0
     $progressBar.Maximum = 100
@@ -988,7 +1003,7 @@ function Show-MainForm {
 
     $lblStatus = New-Object System.Windows.Forms.Label
     $lblStatus.Text = "Gata."
-    $lblStatus.Location = New-Object System.Drawing.Point(722, 437)
+    $lblStatus.Location = New-Object System.Drawing.Point(722, 447)
     $lblStatus.Size = New-Object System.Drawing.Size(115, 20)
     $lblStatus.AutoSize = $false
     $form.Controls.Add($lblStatus)
@@ -996,7 +1011,7 @@ function Show-MainForm {
     # --- Log GroupBox ---
     $grpLog = New-Object System.Windows.Forms.GroupBox
     $grpLog.Text = "Jurnal"
-    $grpLog.Location = New-Object System.Drawing.Point(15, 465)
+    $grpLog.Location = New-Object System.Drawing.Point(15, 475)
     $grpLog.Size = New-Object System.Drawing.Size(822, 300)
     $form.Controls.Add($grpLog)
 
