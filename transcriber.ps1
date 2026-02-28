@@ -185,7 +185,7 @@ function Test-Dependencies {
                 )
                 [System.IO.File]::WriteAllText($runnerPath, ($runnerLines -join [Environment]::NewLine))
                 $script:WhisperExe = $pythonCmd
-                $script:WhisperArgs = @("`"$runnerPath`"")
+                $script:WhisperArgs = @($runnerPath)
                 Add-LogMessage "[OK] Whisper runner creat: $runnerPath"
             }
         }
@@ -649,14 +649,14 @@ function Convert-MediaToWav {
         $errTmp = Join-Path $env:TEMP "ffmpeg_err_$([System.IO.Path]::GetRandomFileName()).tmp"
 
         $proc = Start-Process -FilePath "ffmpeg" `
-            -ArgumentList @("-y", "-i", "`"$InputFile`"", "-ar", "16000", "-ac", "1", "`"$OutputWav`"") `
+            -ArgumentList @("-y", "-i", $InputFile, "-ar", "16000", "-ac", "1", $OutputWav) `
             -NoNewWindow -PassThru `
             -RedirectStandardOutput $outTmp `
             -RedirectStandardError $errTmp 2>$null
 
         while (-not $proc.HasExited) {
             [System.Windows.Forms.Application]::DoEvents()
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds 50
         }
 
         if ($proc.ExitCode -ne 0) {
@@ -703,12 +703,12 @@ function Invoke-WhisperTranscription {
     Add-LogMessage "$taskDesc : $baseName (model: $whisperModelName)"
 
     $argList = @(
-        "`"$WavFile`""
+        $WavFile
         "--model", $whisperModelName
         "--language", $Language
         "--task", $Task
         "--output_format", "srt"
-        "--output_dir", "`"$OutputDir`""
+        "--output_dir", $OutputDir
     )
 
     $outTmp = $null
@@ -725,7 +725,7 @@ function Invoke-WhisperTranscription {
 
         while (-not $proc.HasExited) {
             [System.Windows.Forms.Application]::DoEvents()
-            Start-Sleep -Milliseconds 100
+            Start-Sleep -Milliseconds 50
         }
 
         $expectedSrt = Join-Path $OutputDir "$baseName.srt"
