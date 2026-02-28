@@ -649,7 +649,7 @@ function Convert-MediaToWav {
         $errTmp = Join-Path $env:TEMP "ffmpeg_err_$([System.IO.Path]::GetRandomFileName()).tmp"
 
         $proc = Start-Process -FilePath "ffmpeg" `
-            -ArgumentList @("-y", "-i", $InputFile, "-ar", "16000", "-ac", "1", $OutputWav) `
+            -ArgumentList @("-y", "-i", "`"$InputFile`"", "-ar", "16000", "-ac", "1", "`"$OutputWav`"") `
             -NoNewWindow -PassThru `
             -RedirectStandardOutput $outTmp `
             -RedirectStandardError $errTmp 2>$null
@@ -703,12 +703,12 @@ function Invoke-WhisperTranscription {
     Add-LogMessage "$taskDesc : $baseName (model: $whisperModelName)"
 
     $argList = @(
-        $WavFile
+        "`"$WavFile`""
         "--model", $whisperModelName
         "--language", $Language
         "--task", $Task
         "--output_format", "srt"
-        "--output_dir", $OutputDir
+        "--output_dir", "`"$OutputDir`""
     )
 
     $outTmp = $null
