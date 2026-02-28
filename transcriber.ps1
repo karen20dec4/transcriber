@@ -658,23 +658,19 @@ function Convert-MediaToWav {
             [System.Windows.Forms.Application]::DoEvents()
             Start-Sleep -Milliseconds 50
         }
+        $proc.WaitForExit()
 
-        if ($proc.ExitCode -ne 0) {
-            $errContent = ""
-            if (Test-Path $errTmp) {
-                $errContent = Get-Content $errTmp -Raw -ErrorAction SilentlyContinue
-            }
-            Add-LogMessage "[ERR] FFmpeg a esuat pentru $baseName : $errContent"
-            return $false
+        if ((Test-Path $OutputWav) -and (Get-Item $OutputWav).Length -gt 0) {
+            Add-LogMessage "[OK] Conversie completata: $baseName"
+            return $true
         }
 
-        if (-not (Test-Path $OutputWav) -or (Get-Item $OutputWav).Length -eq 0) {
-            Add-LogMessage "[ERR] Fisierul WAV nu a fost creat corect: $OutputWav"
-            return $false
+        $errContent = ""
+        if (Test-Path $errTmp) {
+            $errContent = Get-Content $errTmp -Raw -ErrorAction SilentlyContinue
         }
-
-        Add-LogMessage "[OK] Conversie completata: $baseName"
-        return $true
+        Add-LogMessage "[ERR] FFmpeg a esuat pentru $baseName : $errContent"
+        return $false
     }
     catch {
         Add-LogMessage "[ERR] Eroare FFmpeg: $_"
@@ -727,6 +723,7 @@ function Invoke-WhisperTranscription {
             [System.Windows.Forms.Application]::DoEvents()
             Start-Sleep -Milliseconds 50
         }
+        $proc.WaitForExit()
 
         $expectedSrt = Join-Path $OutputDir "$baseName.srt"
         if (Test-Path $expectedSrt) {
