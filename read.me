@@ -1,36 +1,106 @@
-#verificam ce versiune avem de python
+# Transcriber - Audio/Video to Subtitles
+
+## Descriere
+Acest proiect transcrie fisiere audio si video in subtitrari (.srt) folosind OpenAI Whisper.
+Disponibil in doua variante: Python (GUI cu tkinter) si PowerShell (GUI cu Windows Forms).
+
+---
+
+## PowerShell Version (transcriber.ps1)
+
+### Formate suportate
+- **Audio**: .mp3
+- **Video**: .mp4, .mov, .mkv, .avi, .wmv
+
+### Functionalitati
+- **Interfata grafica** (Windows Forms) cu butoane, dropdown-uri si bara de progres
+- Transcriere audio/video in subtitrari romanesti (.srt)
+- Traducere optionala a subtitrarii in engleza (RO -> EN)
+- Selectare model Whisper (tiny, base, small, medium, large-v1, large-v2, large-v3, large-v3-turbo)
+- Post-procesare SRT (merge subtitrari scurte, split cele lungi)
+- Sistem de recovery (reia procesarea dupa intrerupere)
+- Detectare automata Whisper (PATH, Python Scripts, fallback wrapper)
+
+### Cerinte
+- Windows PowerShell 5.1 sau PowerShell 7+
+- Python 3.8+
+- OpenAI Whisper (`pip install openai-whisper`)
+- FFmpeg
+
+### Instalare dependente
+```powershell
+# Instaleaza Python si FFmpeg (daca nu sunt deja instalate)
+
+# Instaleaza whisper
+pip install openai-whisper
+
+# Sau cu torch CPU:
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install -U openai-whisper
+```
+
+### Utilizare
+```powershell
+# Lanseaza interfata grafica
+.\transcriber.ps1
+
+# Afiseaza versiunea (mod consola)
+.\transcriber.ps1 -ShowVersion
+
+# Creeaza fisierul de configurare implicit (mod consola)
+.\transcriber.ps1 -Init
+
+# Specifica un fisier de configurare diferit
+.\transcriber.ps1 -ConfigFile "my_config.yaml"
+```
+
+### Detectare Whisper
+Scriptul cauta Whisper in ordinea urmatoare:
+1. `whisper` / `whisper.exe` in PATH
+2. `python -m whisper`
+3. In directoarele Scripts ale Python (system si user)
+4. Fallback: creaza un wrapper Python temporar (`whisper_runner.py`)
+
+---
+
+## Python Version (mp3-to-text-v57.py)
+
+### Cerinte
+```bash
+# Verifica versiunea Python
 python -m pip --version
 
-#instalezi tot
+# Instaleaza dependentele
 python -m pip install whisper openai-whisper srt rich tqdm pyyaml
 
-#Instalează PyYAML și rich:
+# Instaleaza PyYAML si rich
 python -m pip install --upgrade pip
 python -m pip install rich tqdm PyYAML
 
-#Verifică că modulele s-au instalat corect:
+# Verifica modulele
 python -c "import yaml, rich; print('Modules OK')"
 
-
-#instalezi librăriile necesare pentru script (exact în Python-ul ăsta 3.13):
-python -m pip install --upgrade pip
-python -m pip install rich tqdm PyYAML
-
-#instalezi whisper
+# Instaleaza whisper
 python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -U openai-whisper
+```
 
-#Rulează scriptul pentru test:
+### Utilizare
+```bash
+# Ruleaza scriptul
+python mp3-to-text-v57.py
+
+# Sau versiunea CLI
 python mp3-to-text.py --version
 python mp3-to-text.py --init
-
-
-<<<<< si asa rulezi scriptul: >>>>>
 python mp3-to-text.py
+```
 
-daca vrei executabil:
-#instaleaza pyinstaller
+### Executabil (.exe)
+```bash
+# Instaleaza pyinstaller
 python -m pip install pyinstaller
 
-#apoi creezi .exe 
+# Creeaza .exe
 pyinstaller mp3-transcriber.spec
+```
